@@ -1,0 +1,88 @@
+# 数据并行
+
+下文介绍三种数据并行模式：
+- DP
+- DDP
+- FSDP（完全分片数据并行）
+
+## DP
+
+- 使用单进程多线程模式（一张卡对应一个线程），会被 python 的 GIL 约束。
+- 对整网进行 forward 和 backward 后再进行梯度累计，计算步骤和通信步骤完全隔离，低效。
+- 使用基本的 All-Reduce 机制梯度累积，通常 GPU0 作为参数服务器，通信压力集中在一张卡上。
+- 不支持多机多卡训练。
+
+https://pytorch.org/assets/images/scaling-multimodal-image2-diagram-of-standard-data-parallel-training.png
+
+代码示例：
+```Python
+import torch
+model = torch.nn.DataParallel(my_model)
+```
+
+（PS：由于性能问题，现在基本没人用了。）
+
+## DDP
+
+- [DDP](https://pytorch.org/tutorials/intermediate/ddp_tutorial.html) 发表论文 [PyTorch Distributed](https://arxiv.org/pdf/2006.15704.pdf)
+- 基于 Ring-All-Reduce 机制梯度累计，通信压力平均分散在每张卡上。
+- 通过分 bucket（包含几个 layer 的参数）的方式，把集合通讯的时间隐藏在了 backward 计算的时间里面。
+- 多进程的方式，支持多机多卡。
+
+
+![[Figure4_Distributed_Gradient_Rudection.png]]
+
+
+代码示例：
+```Python
+from torch.nn.parallel import DistributedDataParallel as DDP
+ddp_model = DDP(my_module)
+```
+
+## FSDP（完全分片数据并行）
+
+- [FSDP](https://pytorch.org/blog/introducing-pytorch-fully-sharded-data-parallel-api/) 是来自 Pytorch 1.11 的特性，[FSDP API doc](https://pytorch.org/docs/stable/fsdp.html)。
+- FSDP 的灵感来自 [DeepSpeed](https://github.com/microsoft/DeepSpeed)（`Microsoft` 发布的深度学习优化库，其核心是通过 ZeRO 优化显存） 和 [FairScale](https://github.com/facebookresearch/fairscale)（`Meta` 发布的用于高性能和大规模训练的 PyTorch 扩展库）。
+- 通过跨数据并行工作程序分片模型的 parameters，gradients，optimizer states，打破模型分片的障碍。
+
+代码示例：
+```Python
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+sharded_module = FSDP(my_module)
+```
+
+FSDP workflow：
+
+![](https://pytorch.org/assets/images/fsdp_workflow.png)
+
+### ZeRO
+
+ZeRO 的三篇论文：
+- [ZeRO: Memory Optimizations Toward Training Trillion Parameter Models](https://arxiv.org/pdf/1910.02054.pdf)
+- [ZeRO-Offload: Democratizing Billion-Scale Model Training](https://arxiv.org/pdf/2101.06840.pdf)
+- [ZeRO-Infinity: Breaking the GPU Memory Wallfor Extreme Scale Deep Learning](https://arxiv.org/pdf/2104.07857.pdf)
+
+
+训练过程中，显存中主要存放了以下的内容：
+- Temporary Buffer
+- Gradients
+- Acivations
+- Optimizer States
+- ModelParameters
+
+没找到图来源
+![[gpu-memory.webp]]
+
+ZeRO-1 : Optimizer States Sharding
+ZeRO-2 : Optimizer States & Gradients Sharding
+ZeRO-3 : Optimizer States & Gradients & Parameters Sharding
+
+https://arxiv.org/pdf/1910.02054.pdf
+
+
+# 模型并行
+
+
+# 参考链接
+- 数据并行Deep-dive: 从DP 到 Fully Sharded Data Parallel （FSDP）完全分片数据并行：https://zhuanlan.zhihu.com/p/485208899
+- 合集·【AI框架】分布式并行策略：https://space.bilibili.com/517221395/channel/collectiondetail?sid=936465
